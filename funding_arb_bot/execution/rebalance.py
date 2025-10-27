@@ -98,23 +98,20 @@ def plan_rebalance(drift: PositionDrift) -> RebalanceAction:
     # If total exposure < 0, we're net short → need to increase long or reduce short
 
     if total_exposure > 0:
-        # Net long: add to short side (or reduce long if already short on one side)
+        # Net long: add to the short side or trim the long leg.
         if hl_signed < 0:
-            # HL is short, increase it
             exchange = "hyperliquid"
             side = Side.SELL
         else:
-            # Lighter is long, reduce it OR increase HL short
-            exchange = "hyperliquid"
+            exchange = "lighter"
             side = Side.SELL
     else:
-        # Net short: add to long side
+        # Net short: add to the long side or trim the short leg.
         if hl_signed > 0:
-            # HL is long, increase it
             exchange = "hyperliquid"
             side = Side.BUY
         else:
-            exchange = "hyperliquid"
+            exchange = "lighter"
             side = Side.BUY
 
     return RebalanceAction(

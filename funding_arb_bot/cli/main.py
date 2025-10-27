@@ -280,8 +280,8 @@ async def main_loop() -> None:
     async def poll_funding(symbol: str) -> FundingSnapshot:
         """Fetch funding rates with retry logic."""
         try:
-            hl_rates = await retry_api_call(hyperliquid.funding_stream([symbol]).__anext__())
-            lg_rates = await retry_api_call(lighter.funding_stream([symbol]).__anext__())
+            hl_rates = await retry_api_call(lambda: hyperliquid.funding_stream([symbol]).__anext__())
+            lg_rates = await retry_api_call(lambda: lighter.funding_stream([symbol]).__anext__())
             return FundingSnapshot(
                 symbol=symbol,
                 hyperliquid_rate_bps=hl_rates.rate * 1e4,
@@ -455,7 +455,7 @@ async def main_loop() -> None:
                 order_type=OrderType.LIMIT,
                 price=lighter_limit,
                 reduce_only=False,
-                time_in_force=OrderTimeInForce.IOC,
+                time_in_force=tif,
             ),
             leg_b=OrderRequest(
                 client_id=f"hyperliquid:{symbol}:{int(time.time())}",
@@ -465,7 +465,7 @@ async def main_loop() -> None:
                 order_type=OrderType.LIMIT,
                 price=hl_limit,
                 reduce_only=False,
-                time_in_force=OrderTimeInForce.IOC,
+                time_in_force=tif,
             ),
         )
         
@@ -582,7 +582,7 @@ async def main_loop() -> None:
                 order_type=order_type,
                 price=lighter_exit_px,
                 reduce_only=True,
-                time_in_force=OrderTimeInForce.IOC,
+                time_in_force=tif,
             ),
             leg_b=OrderRequest(
                 client_id=f"hyperliquid-exit:{symbol}:{int(time.time())}",
@@ -592,7 +592,7 @@ async def main_loop() -> None:
                 order_type=order_type,
                 price=hl_exit_px,
                 reduce_only=True,
-                time_in_force=OrderTimeInForce.IOC,
+                time_in_force=tif,
             ),
         )
         try:

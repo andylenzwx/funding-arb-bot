@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from concurrent.futures import ThreadPoolExecutor
 from typing import AsyncIterator, Dict, List, Optional
 
@@ -74,7 +75,7 @@ class HyperliquidClient(ExchangeClient):
         loop = asyncio.get_running_loop()
         while True:
             mids = await loop.run_in_executor(self._executor, self._info.all_mids)
-            timestamp = int(asyncio.get_running_loop().time() * 1000)
+            timestamp = int(time.time() * 1000)
             for sym, data in mids.items():
                 if symbols_set and sym not in symbols_set:
                     continue
