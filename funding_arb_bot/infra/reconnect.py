@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import AsyncIterator, Callable, TypeVar
+from typing import AsyncIterator, Awaitable, Callable, TypeVar
 
-from tenacity import RetryError, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +62,15 @@ async def resilient_stream(
     wait=wait_exponential(multiplier=1, min=1, max=10),
     reraise=True,
 )
-async def retry_api_call(coro):
+async def _retry_call(operation: Callable[[], Awaitable[T]]) -> T:
+    return await operation()
+
+
+async def retry_api_call(operation: Callable[[], Awaitable[T]]) -> T:
     """Retry wrapper for API calls with exponential backoff.
 
     Args:
-        coro: Coroutine to execute
+        operation: Zero-argument callable that produces the coroutine to execute
 
     Returns:
         Result of the coroutine
@@ -74,5 +78,6 @@ async def retry_api_call(coro):
     Raises:
         RetryError if all attempts fail
     """
-    return await coro
+
+    return await _retry_call(operation)
 
