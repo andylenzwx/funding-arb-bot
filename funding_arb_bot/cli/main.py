@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import time
 from typing import List, Optional
 
@@ -280,8 +281,8 @@ async def main_loop() -> None:
     async def poll_funding(symbol: str) -> FundingSnapshot:
         """Fetch funding rates with retry logic."""
         try:
-            hl_rates = await retry_api_call(hyperliquid.funding_stream([symbol]).__anext__())
-            lg_rates = await retry_api_call(lighter.funding_stream([symbol]).__anext__())
+            hl_rates = await retry_api_call(lambda: hyperliquid.funding_stream([symbol]).__anext__())
+            lg_rates = await retry_api_call(lambda: lighter.funding_stream([symbol]).__anext__())
             return FundingSnapshot(
                 symbol=symbol,
                 hyperliquid_rate_bps=hl_rates.rate * 1e4,

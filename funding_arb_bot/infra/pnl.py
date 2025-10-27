@@ -235,8 +235,37 @@ class PnLTracker:
         try:
             with open(self._state_file, "r") as f:
                 state = json.load(f)
-            self._total_fees = state.get("total_fees", 0.0)
-            self._total_funding = state.get("total_funding", 0.0)
+            trades = state.get("trades", [])
+            funding = state.get("funding_payments", [])
+
+            self._trades = [
+                TradeRecord(
+                    timestamp=entry.get("timestamp", 0.0),
+                    symbol=entry["symbol"],
+                    exchange=entry["exchange"],
+                    side=entry["side"],
+                    quantity=entry["quantity"],
+                    price=entry["price"],
+                    fee=entry.get("fee", 0.0),
+                    is_entry=entry.get("is_entry", True),
+                )
+                for entry in trades
+            ]
+
+            self._funding_payments = [
+                FundingPayment(
+                    timestamp=entry.get("timestamp", 0.0),
+                    symbol=entry["symbol"],
+                    exchange=entry["exchange"],
+                    rate=entry.get("rate", 0.0),
+                    payment_usd=entry.get("payment_usd", 0.0),
+                    position_size=entry.get("position_size", 0.0),
+                )
+                for entry in funding
+            ]
+
+            self._total_fees = state.get("total_fees", sum(t.fee for t in self._trades))
+            self._total_funding = state.get("total_funding", sum(f.payment_usd for f in self._funding_payments))
             self._realized_pnl = state.get("realized_pnl", 0.0)
             logger.info("pnl_state_loaded", extra=state)
         except Exception as e:
