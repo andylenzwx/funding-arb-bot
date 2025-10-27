@@ -158,11 +158,12 @@ class LighterClient(ExchangeClient):
         base_amount = int(order.size * (10 ** meta.size_decimals))
         tif = SIGNER_TIF[order.time_in_force]
         order_type = SIGNER_TYPE[order.order_type]
+        error_message: str | None = None
         if order.order_type == OrderType.LIMIT:
             if order.price is None:
                 raise ValueError("Limit order requires price")
             price = int(order.price * (10 ** meta.price_decimals))
-            tx, resp, _ = await auth.signer.create_order(
+            _tx, resp, error_message = await auth.signer.create_order(
                 market_index=meta.market_id,
                 client_order_index=int(time.time() * 1000),
                 base_amount=base_amount,
@@ -175,7 +176,7 @@ class LighterClient(ExchangeClient):
             )
         else:
             avg_px = int((order.price or 0) * (10 ** meta.price_decimals))
-            tx, resp, _ = await auth.signer.create_market_order(
+            _tx, resp, error_message = await auth.signer.create_market_order(
                 market_index=meta.market_id,
                 client_order_index=int(time.time() * 1000),
                 base_amount=base_amount,
@@ -184,9 +185,17 @@ class LighterClient(ExchangeClient):
                 reduce_only=order.reduce_only,
             )
 
+        if resp is None:
+            raise RuntimeError(f"Lighter order rejected: {error_message or 'unknown error'}")
+
+        extras = resp.additional_properties or {}
+        order_index = extras.get("order_index") or extras.get("orderIndex")
+        if order_index is None:
+            raise RuntimeError("Lighter response missing order_index; cannot manage order lifecycle")
+
         return OrderResult(
             client_id=order.client_id,
-            exchange_order_id=str(resp.tx_hash or tx.tx_hash if hasattr(tx, "tx_hash") else time.time()),
+            exchange_order_id=f"{meta.market_id}:{int(order_index)}",
             status=str(resp.code),
             filled_size=0.0,
             average_fill_price=None,
@@ -194,7 +203,10 @@ class LighterClient(ExchangeClient):
 
     async def cancel_order(self, exchange_order_id: str) -> None:
         auth = await self._ensure_auth()
-        market_id, order_index = exchange_order_id.split(":")
+        try:
+            market_id, order_index = exchange_order_id.split(":")
+        except ValueError as exc:
+            raise ValueError(f"Invalid exchange_order_id format: {exchange_order_id}") from exc
         await auth.signer.cancel_order(market_index=int(market_id), order_index=int(order_index))
 
 

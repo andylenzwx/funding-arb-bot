@@ -42,13 +42,27 @@ class ExecutionRouter:
         self._auto_reconcile = auto_reconcile
 
     async def execute(self, intent: DualLegIntent) -> ExecutionResult:
-        try:
-            primary_result, hedge_result = await asyncio.gather(
-                self._primary.place_order(intent.leg_a),
-                self._hedge.place_order(intent.leg_b),
-            )
-        except Exception as exc:
-            await self._handle_failure(intent, exc)
+        primary_task = asyncio.create_task(self._primary.place_order(intent.leg_a))
+        hedge_task = asyncio.create_task(self._hedge.place_order(intent.leg_b))
+
+        results = await asyncio.gather(primary_task, hedge_task, return_exceptions=True)
+        primary_result: OrderResult | None = None
+        hedge_result: OrderResult | None = None
+        primary_exc: Exception | None = None
+        hedge_exc: Exception | None = None
+
+        if isinstance(results[0], Exception):
+            primary_exc = results[0]
+        else:
+            primary_result = results[0]
+
+        if isinstance(results[1], Exception):
+            hedge_exc = results[1]
+        else:
+            hedge_result = results[1]
+
+        if primary_exc or hedge_exc:
+            await self._handle_failure(primary_result, hedge_result, primary_exc, hedge_exc)
 
         # Check fill reconciliation
         reconciliation = check_fills(
@@ -86,26 +100,32 @@ class ExecutionRouter:
             imbalance=reconciliation.imbalance,
         )
 
-    async def _handle_failure(self, intent: DualLegIntent, exc: Exception) -> None:
-        # Attempt sequential execution to identify which leg failed
-        primary_result: OrderResult | None = None
-        hedge_result: OrderResult | None = None
-        try:
-            primary_result = await self._primary.place_order(intent.leg_a)
-        except Exception as primary_exc:
-            raise ExecutionError("primary", primary_exc, (primary_result, hedge_result)) from primary_exc
-        try:
-            hedge_result = await self._hedge.place_order(intent.leg_b)
-        except Exception as hedge_exc:
-            await self._attempt_cancel(intent, primary_result)
-            raise ExecutionError("hedge", hedge_exc, (primary_result, hedge_result)) from hedge_exc
-        raise ExecutionError("parallel", exc, (primary_result, hedge_result)) from exc
+    async def _handle_failure(
+        self,
+        primary_result: OrderResult | None,
+        hedge_result: OrderResult | None,
+        primary_exc: Exception | None,
+        hedge_exc: Exception | None,
+    ) -> None:
+        if primary_exc and hedge_exc:
+            combined = RuntimeError(
+                f"primary_leg_failed: {primary_exc}; hedge_leg_failed: {hedge_exc}"
+            )
+            raise ExecutionError("parallel", combined, (primary_result, hedge_result)) from combined
 
-    async def _attempt_cancel(self, intent: DualLegIntent, primary_result: OrderResult | None) -> None:
-        if primary_result is None:
+        if primary_exc:
+            await self._attempt_cancel(self._hedge, hedge_result)
+            raise ExecutionError("primary", primary_exc, (primary_result, hedge_result)) from primary_exc
+
+        if hedge_exc:
+            await self._attempt_cancel(self._primary, primary_result)
+            raise ExecutionError("hedge", hedge_exc, (primary_result, hedge_result)) from hedge_exc
+
+    async def _attempt_cancel(self, exchange: ExchangeClient, result: OrderResult | None) -> None:
+        if result is None:
             return
         try:
-            await self._primary.cancel_order(primary_result.exchange_order_id)
+            await exchange.cancel_order(result.exchange_order_id)
         except Exception:
             # Cancellation best-effort; log upstream
             pass
