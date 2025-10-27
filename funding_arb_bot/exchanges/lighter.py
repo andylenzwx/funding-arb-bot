@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass
-from typing import AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from eth_account import Account as EthAccount
 
@@ -32,6 +32,20 @@ class _MarketMeta:
 class _AuthContext:
     signer: lighter.SignerClient
     account_index: int
+
+
+def _extract_order_index(response: lighter.signer_client.TxHash) -> Optional[int]:
+    """Return the numeric order index embedded in a signer response, if available."""
+
+    extras: Dict[str, Any] = getattr(response, "additional_properties", {}) or {}
+    for key in ("order_index", "orderIndex", "OrderIndex", "orderIdx"):
+        value = extras.get(key)
+        if value is not None:
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                continue
+    return None
 
 
 SIGNER_TIF = {
@@ -158,13 +172,14 @@ class LighterClient(ExchangeClient):
         base_amount = int(order.size * (10 ** meta.size_decimals))
         tif = SIGNER_TIF[order.time_in_force]
         order_type = SIGNER_TYPE[order.order_type]
+        client_order_index = int(time.time() * 1000)
         if order.order_type == OrderType.LIMIT:
             if order.price is None:
                 raise ValueError("Limit order requires price")
             price = int(order.price * (10 ** meta.price_decimals))
             tx, resp, _ = await auth.signer.create_order(
                 market_index=meta.market_id,
-                client_order_index=int(time.time() * 1000),
+                client_order_index=client_order_index,
                 base_amount=base_amount,
                 price=price,
                 is_ask=1 if order.side == Side.SELL else 0,
@@ -177,16 +192,20 @@ class LighterClient(ExchangeClient):
             avg_px = int((order.price or 0) * (10 ** meta.price_decimals))
             tx, resp, _ = await auth.signer.create_market_order(
                 market_index=meta.market_id,
-                client_order_index=int(time.time() * 1000),
+                client_order_index=client_order_index,
                 base_amount=base_amount,
                 avg_execution_price=avg_px,
                 is_ask=1 if order.side == Side.SELL else 0,
                 reduce_only=order.reduce_only,
             )
 
+        order_index = _extract_order_index(resp)
+        if order_index is None:
+            raise RuntimeError("Lighter order placement did not return an order index")
+
         return OrderResult(
             client_id=order.client_id,
-            exchange_order_id=str(resp.tx_hash or tx.tx_hash if hasattr(tx, "tx_hash") else time.time()),
+            exchange_order_id=f"{meta.market_id}:{order_index}",
             status=str(resp.code),
             filled_size=0.0,
             average_fill_price=None,
