@@ -66,7 +66,8 @@ class PortfolioManager:
 
             # Scale notional by edge strength (higher edge = more allocation)
             # But cap at max_symbol_notional
-            edge_multiplier = min(opp.edge_bps / 20, 2.0)  # 20 bps baseline, max 2x
+            edge_strength = abs(opp.edge_bps)
+            edge_multiplier = min(edge_strength / 20, 2.0)  # 20 bps baseline, max 2x
             allocated = min(base_notional * edge_multiplier, self._max_symbol_notional)
 
             # Check total notional limit
