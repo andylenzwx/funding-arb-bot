@@ -65,20 +65,22 @@ async def check_balances(
     total_notional += sum(p.size * p.entry_price for p in hedge_positions)
 
     # Check global notional limit
-    if total_notional + notional_usd > limits.max_total_notional:
+    projected_total = total_notional + (2 * notional_usd)
+    if projected_total > limits.max_total_notional:
         return RiskCheckResult(
             approved=False,
-            reason=f"Total notional {total_notional + notional_usd:.2f} exceeds limit {limits.max_total_notional}",
+            reason=f"Total notional {projected_total:.2f} exceeds limit {limits.max_total_notional}",
         )
 
     # Check per-symbol notional limit
     symbol_notional = sum(p.size * p.entry_price for p in primary_positions if p.symbol == symbol)
     symbol_notional += sum(p.size * p.entry_price for p in hedge_positions if p.symbol == symbol)
 
-    if symbol_notional + notional_usd > limits.max_symbol_notional:
+    projected_symbol = symbol_notional + (2 * notional_usd)
+    if projected_symbol > limits.max_symbol_notional:
         return RiskCheckResult(
             approved=False,
-            reason=f"Symbol {symbol} notional {symbol_notional + notional_usd:.2f} exceeds limit {limits.max_symbol_notional}",
+            reason=f"Symbol {symbol} notional {projected_symbol:.2f} exceeds limit {limits.max_symbol_notional}",
         )
 
     return RiskCheckResult(approved=True, reason="Risk checks passed")
