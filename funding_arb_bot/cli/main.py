@@ -14,6 +14,7 @@ from funding_arb_bot.config import ExecutionConfig, TimeInForce, load_settings
 from funding_arb_bot.exchanges.base import OrderRequest, OrderTimeInForce, OrderType, Side
 from funding_arb_bot.exchanges.hyperliquid import HyperliquidClient
 from funding_arb_bot.exchanges.lighter import LighterClient
+from funding_arb_bot.execution.fees import estimate_fee
 from funding_arb_bot.execution.price_coordination import calculate_limit_prices, get_coordinated_prices
 from funding_arb_bot.execution.risk import check_balances
 from funding_arb_bot.execution.router import DualLegIntent, ExecutionError, ExecutionResult, ExecutionRouter
@@ -487,15 +488,25 @@ async def main_loop() -> None:
             context.state = BotState.HEDGED
             
             # Record trades for PnL tracking
-            lighter_fee = result.primary.filled_size * lighter_limit * 0.0003
-            hl_fee = result.hedge.filled_size * hl_limit * 0.0003
-            
+            lighter_fee = estimate_fee(
+                result.primary.filled_size,
+                result.primary.average_fill_price,
+                lighter_limit,
+            )
+            hl_fee = estimate_fee(
+                result.hedge.filled_size,
+                result.hedge.average_fill_price,
+                hl_limit,
+            )
+            lighter_fill_price = result.primary.average_fill_price or lighter_limit or 0.0
+            hl_fill_price = result.hedge.average_fill_price or hl_limit or 0.0
+
             pnl_tracker.record_trade(
                 symbol=symbol,
                 exchange="lighter",
                 side=primary_side.value,
                 quantity=result.primary.filled_size,
-                price=result.primary.average_fill_price or lighter_limit,
+                price=lighter_fill_price,
                 fee=lighter_fee,
                 is_entry=True,
             )
@@ -504,18 +515,18 @@ async def main_loop() -> None:
                 exchange="hyperliquid",
                 side=hedge_side.value,
                 quantity=result.hedge.filled_size,
-                price=result.hedge.average_fill_price or hl_limit,
+                price=hl_fill_price,
                 fee=hl_fee,
                 is_entry=True,
             )
-            
+
             context.positions[symbol] = {
                 "size": decision.size,
                 "direction": decision.direction,
                 "lighter_filled": result.primary.filled_size,
                 "hl_filled": result.hedge.filled_size,
-                "lighter_entry_px": result.primary.average_fill_price or lighter_limit,
-                "hl_entry_px": result.hedge.average_fill_price or hl_limit,
+                "lighter_entry_px": lighter_fill_price,
+                "hl_entry_px": hl_fill_price,
                 "is_balanced": result.is_balanced,
             }
             portfolio.register_position(symbol, decision.size)
@@ -601,15 +612,25 @@ async def main_loop() -> None:
             context.state = BotState.IDLE
             
             # Record exit trades for PnL
-            exit_lighter_fee = exit_result.primary.filled_size * (lighter_exit_px or 0) * 0.0003
-            exit_hl_fee = exit_result.hedge.filled_size * (hl_exit_px or 0) * 0.0003
-            
+            exit_lighter_fee = estimate_fee(
+                exit_result.primary.filled_size,
+                exit_result.primary.average_fill_price,
+                lighter_exit_px,
+            )
+            exit_hl_fee = estimate_fee(
+                exit_result.hedge.filled_size,
+                exit_result.hedge.average_fill_price,
+                hl_exit_px,
+            )
+            exit_lighter_price = exit_result.primary.average_fill_price or lighter_exit_px or 0.0
+            exit_hl_price = exit_result.hedge.average_fill_price or hl_exit_px or 0.0
+
             pnl_tracker.record_trade(
                 symbol=symbol,
                 exchange="lighter",
                 side="sell" if lighter_pos.side == Side.BUY else "buy",
                 quantity=exit_result.primary.filled_size,
-                price=exit_result.primary.average_fill_price or lighter_exit_px or 0,
+                price=exit_lighter_price,
                 fee=exit_lighter_fee,
                 is_entry=False,
             )
@@ -618,7 +639,7 @@ async def main_loop() -> None:
                 exchange="hyperliquid",
                 side="sell" if hl_pos.side == Side.BUY else "buy",
                 quantity=exit_result.hedge.filled_size,
-                price=exit_result.hedge.average_fill_price or hl_exit_px or 0,
+                price=exit_hl_price,
                 fee=exit_hl_fee,
                 is_entry=False,
             )
